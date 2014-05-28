@@ -53,7 +53,7 @@ object Migrate {
    * @param mutate migration reads
    * @return
    */
-  def migrate(mutate: Reads[_ <: JsValue]*): Reads[JsValue] = migrateFrom(0, mutate: _*)
+  def migrate(mutate: Reads[_ <: JsValue]*): Reads[JsValue] = migrate(0)(mutate: _*)
 
   /**
    * Creates a single Reads for migrations, given that you've dropped baseVersion number of migrations
@@ -61,23 +61,12 @@ object Migrate {
    * @param mutate migration reads
    * @return
    */
-  def migrateFrom(baseVersion: Int, mutate: Reads[_ <: JsValue]*): Reads[JsValue] = Reads[JsValue] {
+  def migrate(baseVersion: Int)(mutate: Reads[_ <: JsValue]*): Reads[JsValue] = Reads[JsValue] {
     json =>
       mutatesTransform(
         json,
         mutate.drop(schemaVersion(json) - baseVersion)
       ).flatMap(_.transform(putField(schemaVersionField, baseVersion + mutate.length)))
-  }
-
-  /**
-   * A composed Read for your domain class
-   * @param reads Reads for the last version of your data
-   * @param mutate migration reads
-   * @tparam T type of your domain class. Must contain schemaVersionField
-   * @return
-   */
-  def readMigrating[T <: VersionedDocument](reads: Reads[T], mutate: Reads[_ <: JsValue]*): Reads[T] = {
-    readMigratingFrom(reads, 0, mutate: _*)
   }
 
   /**
@@ -88,19 +77,8 @@ object Migrate {
    * @tparam T type of your domain class. Must contain schemaVersionField
    * @return
    */
-  def readMigratingFrom[T <: VersionedDocument](reads: Reads[T], baseVersion: Int, mutate: Reads[_ <: JsValue]*): Reads[T] = {
-    migrateFrom(baseVersion, mutate: _*) andThen reads
-  }
-
-  /**
-   * A composed Format for your domain class
-   * @param format Format for the last version of your data
-   * @param mutate migration reads
-   * @tparam T type of your domain class. Must contain schemaVersionField
-   * @return
-   */
-  def formatMigrating[T <: VersionedDocument](format: Format[T], mutate: Reads[_ <: JsValue]*): Format[T] = {
-    formatMigratingFrom(format, 0, mutate: _*)
+  def readMigrating[T <: VersionedDocument](reads: Reads[T], baseVersion: Int = 0)(mutate: Reads[_ <: JsValue]*): Reads[T] = {
+    migrate(baseVersion)(mutate: _*) andThen reads
   }
 
   /**
@@ -111,8 +89,8 @@ object Migrate {
    * @tparam T type of your domain class. Must contain schemaVersionField
    * @return
    */
-  def formatMigratingFrom[T <: VersionedDocument](format: Format[T], baseVersion: Int, mutate: Reads[_ <: JsValue]*): Format[T] = {
-    Format[T](readMigratingFrom(format, baseVersion, mutate: _*), format)
+  def formatMigrating[T <: VersionedDocument](format: Format[T], baseVersion: Int = 0)(mutate: Reads[_ <: JsValue]*): Format[T] = {
+    Format[T](readMigrating(format, baseVersion)(mutate: _*), format)
   }
 
   /**

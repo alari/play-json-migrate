@@ -82,7 +82,7 @@ class MigrateSpec extends Specification {
 
       m.reads(oldJson) must_== JsSuccess(correctJson ++ Json.obj(schemaVersionField -> 4), __ \ "any" \ "other")
 
-      val m2 = readMigrating[TestCase](
+      val m2 = readMigrating(testReads)(
         renameField("other", "test"),
         renameField("some", "other"),
         removeField("any"),
@@ -95,13 +95,13 @@ class MigrateSpec extends Specification {
     }
 
     "respect base version" in {
-      migrateFrom(2,
+      migrate(2)(
         removeField("a"),
         removeField("b"),
         removeField("c")
       ).reads(Json.obj("a" -> 1, "b" -> 2, "c" -> 3)) must_== JsSuccess(Json.obj(schemaVersionField -> 5), __ \ "a" \ "b" \ "c")
 
-      migrateFrom(2,
+      migrate(2)(
         removeField("a"),
         removeField("b"),
         removeField("c")
