@@ -1,14 +1,12 @@
 organization := "play-infra"
 
-version := "1.0-SNAPSHOT"
+version := "0.1-SNAPSHOT"
 
 scalaVersion := "2.10.4"
 
 sbtVersion := "0.13.1"
 
 name := "play-json-migrate"
-
-version := "1.0"
 
 libraryDependencies ++= {
   Seq(

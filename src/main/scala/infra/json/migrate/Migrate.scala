@@ -7,53 +7,233 @@ import Reads._
 /**
  * @author alari
  * @since 5/28/14
+ *
+ *        It's a helper to help you keep your jsons consistent
  */
 object Migrate {
-  val schemaField = "jsonSchemaVersion"
+  /**
+   * A field where json schema number is contained
+   */
+  val schemaVersionField = "jsonSchemaVersion"
 
+  /**
+   * You should store json schema version in json
+   */
   type VersionedDocument = {def jsonSchemaVersion: Option[Int]}
-  
-  def schemaOf(json: JsValue) = (json \ schemaField).asOpt[Int].getOrElse(0)
 
+  /**
+   * Applies a number of mutations to json
+   * @param json source document
+   * @param mutate migration reads
+   * @return
+   */
+  def mutatesTransform(json: JsValue, mutate: Seq[Reads[_ <: JsValue]]): JsResult[JsValue] =
+    mutate.foldLeft[JsResult[JsValue]](JsSuccess(json)) {
+      case (a, b) => a.flatMap(_.transform(b))
+    }
+
+  /**
+   * Converts a number of mutations to a Reads[JsValue]
+   * @param mutate migration reads
+   * @return
+   */
+  def mutatesReads(mutate: Seq[Reads[_ <: JsValue]]): Reads[JsValue] = Reads[JsValue] {
+    json => mutatesTransform(json, mutate)
+  }
+
+  /**
+   * Schema version number
+   * @param json source document
+   * @return
+   */
+  def schemaVersion(json: JsValue) = (json \ schemaVersionField).asOpt[Int].getOrElse(0)
+
+  /**
+   * Creates a single Reads for migrations
+   * @param mutate migration reads
+   * @return
+   */
   def migrate(mutate: Reads[_ <: JsValue]*): Reads[JsValue] = migrateFrom(0, mutate: _*)
 
-  def migrateFrom(baseVersion: Int, mutate: Reads[_ <: JsValue]*): Reads[JsValue] = Reads[JsValue]{
+  /**
+   * Creates a single Reads for migrations, given that you've dropped baseVersion number of migrations
+   * @param baseVersion base version to count migrations from
+   * @param mutate migration reads
+   * @return
+   */
+  def migrateFrom(baseVersion: Int, mutate: Reads[_ <: JsValue]*): Reads[JsValue] = Reads[JsValue] {
     json =>
-      mutate.drop(schemaOf(json) - baseVersion).foldLeft[JsResult[JsValue]](JsSuccess(json)){
-        case (a, b) => a.flatMap(_.transform(b))
-      }.flatMap(_.transform(putField(schemaField, baseVersion + mutate.length)))
+      mutatesTransform(
+        json,
+        mutate.drop(schemaVersion(json) - baseVersion)
+      ).flatMap(_.transform(putField(schemaVersionField, baseVersion + mutate.length)))
   }
 
-  def readMigrating[T <:VersionedDocument](mutate: Reads[_ <: JsValue]*)(implicit r: Reads[T]): Reads[T] = {
-    readMigratingFrom(0, mutate: _*)
+  /**
+   * A composed Read for your domain class
+   * @param reads Reads for the last version of your data
+   * @param mutate migration reads
+   * @tparam T type of your domain class. Must contain schemaVersionField
+   * @return
+   */
+  def readMigrating[T <: VersionedDocument](reads: Reads[T], mutate: Reads[_ <: JsValue]*): Reads[T] = {
+    readMigratingFrom(reads, 0, mutate: _*)
   }
 
-  def readMigratingFrom[T <: VersionedDocument](baseVersion: Int, mutate: Reads[_ <: JsValue]*)(implicit r: Reads[T]): Reads[T] = {
-    migrateFrom(baseVersion, mutate: _*) andThen r
+  /**
+   * A composed Read for your domain class, given that you've dropped baseVersion number of migrations
+   * @param reads Reads for the last version of your data
+   * @param baseVersion base version to count migrations from
+   * @param mutate migration reads
+   * @tparam T type of your domain class. Must contain schemaVersionField
+   * @return
+   */
+  def readMigratingFrom[T <: VersionedDocument](reads: Reads[T], baseVersion: Int, mutate: Reads[_ <: JsValue]*): Reads[T] = {
+    migrateFrom(baseVersion, mutate: _*) andThen reads
   }
 
-  def renameField(from: String, to: String): Reads[JsObject] = (
-    (__ \ to).json.copyFrom((__ \ from).json.pick) ~
-      (__ \ from).json.prune
-    ).reduce
-
-  def updateField[T : Reads](name: String, change: T => _ <: JsValue): Reads[JsObject] = {
-    (__ \ name).json.update( __.read[T].map(change) )
+  /**
+   * A composed Format for your domain class
+   * @param format Format for the last version of your data
+   * @param mutate migration reads
+   * @tparam T type of your domain class. Must contain schemaVersionField
+   * @return
+   */
+  def formatMigrating[T <: VersionedDocument](format: Format[T], mutate: Reads[_ <: JsValue]*): Format[T] = {
+    formatMigratingFrom(format, 0, mutate: _*)
   }
 
-  def putField[T : Writes](name: String, value: T): Reads[JsObject] = {
+  /**
+   * A composed Format for your domain class, given that you've dropped baseVersion number of migrations
+   * @param format Format for the last version of your data
+   * @param baseVersion base version to count migrations from
+   * @param mutate migration reads
+   * @tparam T type of your domain class. Must contain schemaVersionField
+   * @return
+   */
+  def formatMigratingFrom[T <: VersionedDocument](format: Format[T], baseVersion: Int, mutate: Reads[_ <: JsValue]*): Format[T] = {
+    Format[T](readMigratingFrom(format, baseVersion, mutate: _*), format)
+  }
+
+  /**
+   * Simple field renaming mutator
+   * @param from from
+   * @param to to
+   * @return
+   */
+  def renameField(from: String, to: String): Reads[JsObject] =
+    moveBranch(__ \ from, __ \ to)
+
+  /**
+   * Field updater. MERGES old field's data with the new one -- if it's an JsObject
+   * @param name field name
+   * @param change mapper function
+   * @tparam T current field type
+   * @return
+   */
+  def updateField[T: Reads](name: String)(change: T => _ <: JsValue): Reads[JsObject] = {
+    updateField(__ \ name)(change)
+  }
+
+  /**
+   * Field updater. MERGES old field's data with the new one -- if it's an JsObject
+   * @param path leaf path
+   * @param change mapper function
+   * @tparam T current field type
+   * @return
+   */
+  def updateField[T: Reads](path: JsPath)(change: T => _ <: JsValue): Reads[JsObject] = {
+    path.json.update(__.read[T].map(change))
+  }
+
+  /**
+   * Replaces field value with the mapper output.
+   * @param name field name
+   * @param change mapper function
+   * @tparam T current type of the field
+   * @return
+   */
+  def mapField[T: Reads](name: String)(change: T => _ <: JsValue): Reads[JsObject] = {
+    mapField(__ \ name)(change)
+  }
+
+  /**
+   * Replaces field value with the mapper output.
+   * @param path field path
+   * @param change mapper function
+   * @tparam T current type of the field
+   * @return
+   */
+  def mapField[T: Reads](path: JsPath)(change: T => _ <: JsValue): Reads[JsObject] = {
+    path.json.pickBranch(__.read[T].map(change))
+  }
+
+  /**
+   * Puts some data into a field
+   * @param name field name
+   * @param value new value
+   * @tparam T value type to write
+   * @return
+   */
+  def putField[T: Writes](name: String, value: T): Reads[JsObject] = {
     (
       __.json.pickBranch ~
-      (__ \ name).json.put(implicitly[Writes[T]].writes(value))
+        (__ \ name).json.put(implicitly[Writes[T]].writes(value))
       ).reduce
   }
 
-  def removeField(name: String): Reads[JsObject] = {
-    (__ \ name).json.prune
+  /**
+   * Puts some data into a field
+   * @param path field path
+   * @param value new value
+   * @tparam T value type to write
+   * @return
+   */
+  def putField[T: Writes](path: JsPath, value: T): Reads[JsObject] = {
+    (
+      __.json.pickBranch ~
+        path.json.put(implicitly[Writes[T]].writes(value))
+      ).reduce
   }
 
-  def moveBranch(from: JsPath, to: JsPath): Reads[JsObject] = ???
+  /**
+   * Removes a field by name
+   * @param name field name
+   * @return
+   */
+  def removeField(name: String): Reads[JsObject] =
+    removeField(__ \ name)
 
-  def insideBranch(branch: JsPath, mutate: Reads[_ <: JsValue]*): Reads[JsObject] = ???
+  /**
+   * Removes a field by path
+   * @param path field path
+   * @return
+   */
+  def removeField(path: JsPath): Reads[JsObject] =
+    path.json.prune
+
+  /**
+   * Moves a branch from one path to another. If some of the old ancestors are empty, they will be kept
+   * @param from from path
+   * @param to to path
+   * @return
+   */
+  def moveBranch(from: JsPath, to: JsPath): Reads[JsObject] = (
+    to.json.copyFrom(from.json.pick) ~
+      from.json.prune
+    ).reduce
+
+  /**
+   * Allows to execute some mutations in a branch scope.
+   * Use with care! There could be bugs.
+   * Don't try to nest insideBranch inside insideBranch without deep testing.
+   * @param branch branch path
+   * @param mutate migration reads
+   * @return
+   */
+  def insideBranch(branch: JsPath)(mutate: Reads[_ <: JsValue]*): Reads[JsObject] =
+    branch.json.pickBranch(
+      mutatesReads(mutate)
+    )
 
 }
