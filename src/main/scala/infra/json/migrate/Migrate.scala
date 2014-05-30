@@ -58,39 +58,45 @@ object Migrate {
   /**
    * Creates a single Reads for migrations, given that you've dropped baseVersion number of migrations
    * @param baseVersion base version to count migrations from
+   * @param onInit function to be called once with number of current schema. It's launched in current thread
    * @param mutate migration reads
    * @return
    */
-  def migrate(baseVersion: Int)(mutate: Reads[_ <: JsValue]*): Reads[JsValue] = Reads[JsValue] {
-    json =>
-      mutatesTransform(
-        json,
-        mutate.drop(schemaVersion(json) - baseVersion)
-      ).flatMap(_.transform(putField(schemaVersionField, baseVersion + mutate.length)))
+  def migrate(baseVersion: Int = 0, onInit: (Int)=>Unit = {_:Int => ()})(mutate: Reads[_ <: JsValue]*): Reads[JsValue] = {
+    onInit(baseVersion + mutate.size)
+    Reads[JsValue] {
+      json =>
+        mutatesTransform(
+          json,
+          mutate.drop(schemaVersion(json) - baseVersion)
+        ).flatMap(_.transform(putField(schemaVersionField, baseVersion + mutate.length)))
+    }
   }
 
   /**
    * A composed Read for your domain class, given that you've dropped baseVersion number of migrations
    * @param reads Reads for the last version of your data
    * @param baseVersion base version to count migrations from
+   * @param onInit function to be called once with number of current schema. It's launched in current thread
    * @param mutate migration reads
    * @tparam T type of your domain class. Must contain schemaVersionField
    * @return
    */
-  def readMigrating[T <: VersionedDocument](reads: Reads[T], baseVersion: Int = 0)(mutate: Reads[_ <: JsValue]*): Reads[T] = {
-    migrate(baseVersion)(mutate: _*) andThen reads
+  def readMigrating[T <: VersionedDocument](reads: Reads[T], baseVersion: Int = 0, onInit: (Int)=>Unit = {_:Int => ()})(mutate: Reads[_ <: JsValue]*): Reads[T] = {
+    migrate(baseVersion, onInit)(mutate: _*) andThen reads
   }
 
   /**
    * A composed Format for your domain class, given that you've dropped baseVersion number of migrations
    * @param format Format for the last version of your data
    * @param baseVersion base version to count migrations from
+   * @param onInit function to be called once with number of current schema. It's launched in current thread
    * @param mutate migration reads
    * @tparam T type of your domain class. Must contain schemaVersionField
    * @return
    */
-  def formatMigrating[T <: VersionedDocument](format: Format[T], baseVersion: Int = 0)(mutate: Reads[_ <: JsValue]*): Format[T] = {
-    Format[T](readMigrating(format, baseVersion)(mutate: _*), format)
+  def formatMigrating[T <: VersionedDocument](format: Format[T], baseVersion: Int = 0, onInit: (Int)=>Unit = {_:Int => ()})(mutate: Reads[_ <: JsValue]*): Format[T] = {
+    Format[T](readMigrating(format, baseVersion, onInit)(mutate: _*), format)
   }
 
   /**
