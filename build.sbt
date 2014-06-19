@@ -1,16 +1,15 @@
 organization := "play-infra"
 
-version := "0.1-SNAPSHOT"
-
-scalaVersion := "2.10.4"
-
-sbtVersion := "0.13.1"
-
 name := "play-json-migrate"
+
+version := "0.3.0"
+
+crossScalaVersions := Seq("2.10.4", "2.11.1")
+
 
 libraryDependencies ++= {
   Seq(
-    "com.typesafe.play" %% "play-json" % "2.2.3",
+    "com.typesafe.play" %% "play-json" % "2.3.0",
     "org.specs2" %% "specs2" % "2.3.12" % "test"
   )
 }
