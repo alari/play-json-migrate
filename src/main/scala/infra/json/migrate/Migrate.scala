@@ -96,7 +96,23 @@ object Migrate {
    * @return
    */
   def formatMigrating[T <: VersionedDocument](format: Format[T], baseVersion: Int = 0, onInit: (Int)=>Unit = {_:Int => ()})(mutate: Reads[_ <: JsValue]*): Format[T] = {
-    Format[T](readMigrating(format, baseVersion, onInit)(mutate: _*), format)
+    Format[T](readMigrating(format, baseVersion, onInit)(mutate: _*), writeMigrating(baseVersion + mutate.size, format))
+  }
+
+  /**
+   * Write latest version by default -- for new domains
+   * @param version current version
+   * @param writes writes without custom schema version logic
+   * @tparam T versioned domain
+   * @return
+   */
+  def writeMigrating[T <: VersionedDocument](version: Int, writes: Writes[T]): Writes[T] = Writes[T]{o =>
+    val json = writes.writes(o)
+    (json \ schemaVersionField).asOpt[Int] match {
+      case Some(_) => json
+      case None =>
+        json.asInstanceOf[JsObject] ++ Json.obj(schemaVersionField -> version)
+    }
   }
 
   /**
