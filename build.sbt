@@ -9,7 +9,7 @@ crossScalaVersions := Seq("2.10.4", "2.11.2")
 
 libraryDependencies ++= {
   Seq(
-    "com.typesafe.play" %% "play-json" % "2.3.3",
+    "com.typesafe.play" %% "play-json" % "2.3.2",
     "org.specs2" %% "specs2" % "2.3.12" % "test"
   )
 }
